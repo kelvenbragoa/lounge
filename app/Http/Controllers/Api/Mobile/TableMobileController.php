@@ -1,0 +1,564 @@
+<?php
+
+namespace App\Http\Controllers\Api\Mobile;
+
+use App\Http\Controllers\Concerns\HandlesIdempotency;
+use App\Http\Controllers\Concerns\ManagesPrincipalStock;
+use App\Http\Controllers\Concerns\ProcessesCardPayments;
+use App\Http\Controllers\Concerns\ResolvesOrderCashTender;
+use App\Http\Controllers\Controller;
+use App\Models\CashRegister;
+use App\Models\Category;
+use App\Models\DailyStockSnapshot;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
+use App\Models\Product;
+use App\Models\StockSnapshot;
+use App\Models\Table;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
+
+class TableMobileController extends Controller
+{
+    use HandlesIdempotency;
+    use ManagesPrincipalStock;
+    use ProcessesCardPayments;
+    use ResolvesOrderCashTender;
+
+    /**
+     * Display a listing of the resource.
+     */
+    public function index()
+    {
+        //
+        $searchQuery = request('query');
+
+        $tables = Table::query()
+            ->when(request('query'), function ($query, $searchQuery) {
+                $query->where('name', 'like', "%{$searchQuery}%");
+            })
+            ->with('status')
+            ->with('last_order.user')
+            ->orderBy('name', 'asc')
+            ->get();
+
+        return response()->json($tables);
+    }
+
+    public function createorder(Request $request)
+    {
+
+        $data = $request->all();
+        $table = Table::find($data['table_id']);
+
+        $totalVendasMensal = Order::where('table_id', $table->id)
+        // ->where('order_status_id', 3)
+        ->whereMonth('created_at', now()->month)
+        ->whereYear('created_at', now()->year)
+        ->sum('total');
+
+        
+
+        $openCashRegister = CashRegister::where('user_id', Auth::id())
+            ->where('cash_register_status_id', 1) // 1 = Aberto
+            ->first();
+
+        if (!$openCashRegister) {
+            return response()->json([
+                'message' => 'Não é possível realizar a venda. Abra o caixa primeiro.'
+            ], 200); // Código HTTP 403 - Proibido
+        }
+
+        if ($table->table_status_id == 5) {
+            return response()->json(['message' => 'A mesa esta finalizada.'], 200);
+        }
+        $product = Product::find($data['product_id']);
+
+        $novoPedidoTotal = $data['quantity'] * $product->price;
+
+        if ($table->monthly_limit > 0 && ($totalVendasMensal + $novoPedidoTotal) > $table->monthly_limit) {
+            return response()->json([
+                'message' => 'Esta mesa atingiu o limite de vendas mensal de ' . $table->monthly_limit . ' MT, atualmente em ' . $totalVendasMensal . ' MT. Por favor, aguarde o próximo mês ou aumente o limite.'
+            ], 403);
+        }
+
+        try {
+            DB::transaction(function () use ($data, $table, $openCashRegister, $product) {
+                if ($table->table_status_id == 1) {
+                    $order = Order::create([
+                        'table_id' => $table->id,
+                        'user_id' => $data['user_id'],
+                        'total' => $data['quantity'] * $product->price,
+                        'order_status_id' => 1,
+                        'cash_register_id' => $openCashRegister->id
+                    ]);
+
+                    $orderItem = OrderItem::create([
+                        'order_id' => $order->id,
+                        'product_id' => $data['product_id'],
+                        'quantity' => $data['quantity'],
+                        'order_item_status_id' => 1,
+                        'department_id' => $product->department_id,
+                        'price' => $product->price,
+                        'total' => $data['quantity'] * $product->price,
+                        'user_id' => Auth::user()->id,
+                        'cash_register_id' => $openCashRegister->id
+                    ]);
+
+                    $this->debitPrincipalStock(
+                        (int) $data['product_id'],
+                        (int) $data['quantity'],
+                        \App\Models\StockMovement::REASON_SALE,
+                        OrderItem::class,
+                        (int) $orderItem->id
+                    );
+
+                    $this->guardTableCard($order, $data);
+                }
+
+                if ($table->table_status_id == 2) {
+                    $last_order = Order::where('table_id', $table->id)->where('order_status_id', 1)->lockForUpdate()->first();
+
+                    if ($last_order->user_id != Auth::user()->id) {
+                        throw new RuntimeException(
+                            'Impossivel adicionar itens a esta mesa. Esta mesa foi aberta por' . $last_order->user->name
+                        );
+                    }
+
+                    $orderItem = OrderItem::create([
+                        'order_id' => $last_order->id,
+                        'product_id' => $data['product_id'],
+                        'quantity' => $data['quantity'],
+                        'department_id' => $product->department_id,
+                        'order_item_status_id' => 1,
+                        'price' => $product->price,
+                        'total' => $product->price * $data['quantity'],
+                        'user_id' => Auth::user()->id,
+                        'cash_register_id' => $openCashRegister->id
+                    ]);
+
+                    $this->debitPrincipalStock(
+                        (int) $data['product_id'],
+                        (int) $data['quantity'],
+                        \App\Models\StockMovement::REASON_SALE,
+                        OrderItem::class,
+                        (int) $orderItem->id
+                    );
+
+                    $last_order->update([
+                        'total' => OrderItem::where('order_id', $last_order->id)->sum('total')
+                    ]);
+
+                    $this->guardTableCard($last_order, $data);
+                }
+
+                $table->update([
+                    'table_status_id' => 2
+                ]);
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 400);
+        }
+
+        return response()->json([
+            'message' => "Produto adiconado a conta"
+        ]);
+    }
+
+    /**
+     * Show the form for creating a new resource.
+     */
+
+    public function consumption(string $id)
+    {
+        $table = Table::find($id);
+
+        $order = Order::where('table_id', $table->id)
+            ->where(function ($query) {
+                $query->where('order_status_id', 1)
+                    ->orWhere('order_status_id', 2);
+            })
+            ->with('itens.product')
+            ->with('status')
+            ->with('table')
+            ->with('user')
+            ->first();
+        $order_id = 0;
+        if ($order) {
+            $order_id = $order->id;
+        }
+
+
+
+
+        return response()->json([
+            "order" => $order
+        ]);
+    }
+
+    public function closeaccount(string $id)
+    {
+        $table = Table::find($id);
+        $order = Order::where('table_id', $id)->where('order_status_id', 1)->first();
+
+        if ($order->user_id != Auth::user()->id) {
+            return response()->json([
+                'message' => "Impossivel adicionar itens a esta mesa. Esta mesa foi aberta por" . $order->user->name
+            ], 400); // Código HTTP 403 - Proibido
+        }
+
+
+
+        $order->update([
+            "order_status_id" => 2,
+            "closed_by_user_id" => Auth::user()->id
+        ]);
+
+        $table->update([
+            "table_status_id" => 5
+        ]);
+
+        $orderitens = OrderItem::where('order_id', $order->id)->get();
+
+        return response()->json([
+            "message" => "Conta fechada com sucesso",
+        ]);
+    }
+
+    public function openCashRegister(Request $request)
+    {
+        $userId = Auth::id();
+        $today = now()->toDateString();
+
+        // Verifica se já existe caixa aberto para este usuário
+        $existingCashRegister = CashRegister::where('user_id', $userId)
+            ->where('cash_register_status_id', 1)
+            ->first();
+
+        if ($existingCashRegister) {
+            return response()->json([
+                'message' => 'Já existe uma caixa aberta para este usuário.',
+                'cash_register' => $existingCashRegister
+            ], 200);
+        }
+
+        // Cria novo caixa
+        $cashRegister = CashRegister::create([
+            'user_id' => $userId,
+            'cash_register_status_id' => 1,
+            'opening_balance' => 0,
+            'opened_at' => now(),
+        ]);
+
+        // Carrega produtos com stock atual no armazém principal
+        $products = Product::withQuantityInPrincipalStock()->get();
+
+        // Snapshot por caixa (stock visível ao vendedor)
+        $snapshots = [];
+        foreach ($products as $product) {
+            $snapshots[] = [
+                'product_id' => $product->id,
+                'cash_register_id' => $cashRegister->id,
+                'quantity' => $product->quantity_in_principal_stock,
+                'date' => $today,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        }
+        StockSnapshot::insert($snapshots);
+
+        // Snapshot diário geral (uma vez por dia)
+        $alreadySnapshotted = DailyStockSnapshot::where('date', $today)->exists();
+
+        if (!$alreadySnapshotted) {
+            $dailySnapshots = [];
+            foreach ($products as $product) {
+                $dailySnapshots[] = [
+                    'product_id' => $product->id,
+                    'quantity' => $product->quantity_in_principal_stock,
+                    'date' => $today,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+            DailyStockSnapshot::insert($dailySnapshots);
+        }
+
+        return response()->json([
+            'message' => 'Caixa aberta com sucesso',
+            'cash_register' => $cashRegister
+        ]);
+    }
+
+    // public function openCashRegister(Request $request)
+    // {
+    //     $data = $request->all();
+    //     $existingCashRegister = CashRegister::where('user_id', Auth::user()->id)
+    //         ->where('cash_register_status_id', 1)
+    //         ->first();
+
+    //     if ($existingCashRegister) {
+    //         return response()->json([
+    //             'message' => 'Já existe uma caixa aberto para este usuário.',
+    //             'cash_register' => $existingCashRegister
+    //         ], 200);
+    //     }
+    //     $cashregister = CashRegister::create([
+    //         'user_id' => Auth::user()->id,
+    //         'cash_register_status_id' => 1,
+    //         'opening_balance' => 0,
+    //         'opened_at' => now(),
+    //     ]);
+
+    //     return response()->json([
+    //         'message' => 'Caixa aberta com sucesso',
+    //     ]);
+    // }
+
+
+    public function closeCashRegister(Request $request)
+    {
+
+        $data = $request->all();
+        $cashRegister = CashRegister::where('user_id', Auth::id())
+            ->where('cash_register_status_id', 1) // 1 = Aberto
+            ->first();
+
+        if (!$cashRegister) {
+            return response()->json([
+                'message' => 'Nenhum caixa aberto encontrado para este usuário.'
+            ], 200);
+        }
+
+        $order = Order::where('cash_register_id', $cashRegister->id)
+            ->where(function ($query) {
+                $query->where('order_status_id', 1)
+                    ->orWhere('order_status_id', 2);
+            })
+            ->first();
+        if ($order) {
+            return response()->json([
+                'message' => 'Existe uma encomenda que não foi finalizada. Por Favor Finalize e Feche a sua conta.'
+            ], 200);
+        }
+
+
+
+        // Calcular o total de vendas realizadas durante o período do caixa
+        $totalSales = OrderItem::where('cash_register_id', $cashRegister->id)
+            ->sum('total');
+
+        // Atualizar informações do caixa
+        $cashRegister->update([
+            'closing_balance' => $data['closing_balance'],
+            'automatic_closing_balance' => $totalSales,
+            'closed_at' => now(),
+            'difference' => $totalSales - $data['closing_balance'],
+            'cash_register_status_id' => 2 // 2 = Fechado
+        ]);
+
+        // // Calcular a diferença entre o saldo esperado e o real
+        // $expectedBalance = $cashRegister->opening_balance + $totalSales;
+        // $difference = $request->closing_balance - $expectedBalance;
+
+        return response()->json([
+            'message' => 'Caixa Fechada com suscesso'
+        ], 200);
+    }
+
+    public function home()
+    {
+
+        $openCashRegister = CashRegister::where('user_id', Auth::id())
+            ->where('cash_register_status_id', 1) // 1 = Aberto
+            ->first();
+        if ($openCashRegister) {
+            $total = $openCashRegister->orderItens()->sum('total');
+
+            return response()->json([
+                'cash_register' => $openCashRegister,
+                'totalcash' => (float) $total
+            ]);
+        }
+
+
+        return response()->json([
+            'cash_register' => $openCashRegister,
+            'totalcash' => 0
+        ]);
+    }
+
+
+    public function quicksell()
+    {
+
+        $openCashRegister = CashRegister::where('user_id', Auth::id())
+            ->where('cash_register_status_id', 1) // 1 = Aberto
+            ->first();
+
+        // if (!$openCashRegister) {
+        //     return response()->json([
+        //         'message' => 'Não é possível realizar ou iniciar a venda. Abra o caixa primeiro.'
+        //     ], 403); // Código HTTP 403 - Proibido
+        // }
+
+        $categories = Category::with(['sub_categories.products' => function ($query) {
+            $query->withQuantityInPrincipalStock();
+        }])->get();
+
+
+        return response()->json([
+            "categories" => $categories,
+            "payment_methods" => $this->saleablePaymentMethods(),
+        ]);
+    }
+
+    public function paymentMethods()
+    {
+        $methods = $this->saleablePaymentMethods();
+
+        return response()->json([
+            'payment_methods' => $methods->values(),
+            'card_payment_method_id' => $methods->firstWhere('is_card', 1)?->id,
+            'exclusive' => (bool) config('cards.exclusive_payment'),
+        ]);
+    }
+
+    public function savequicksell(Request $request)
+    {
+        return $this->withIdempotency($request, 'mobile.quicksell', function () use ($request) {
+        $data = $request->all();
+        $card = null;
+
+        $openCashRegister = CashRegister::where('user_id', Auth::id())
+            ->where('cash_register_status_id', 1) // 1 = Aberto
+            ->first();
+
+        if (!$openCashRegister) {
+            return response()->json([
+                'message' => 'Não é possível realizar a venda. Abra o caixa primeiro.'
+            ], 400); // Código HTTP 403 - Proibido
+        }
+
+        $paymentMethod = PaymentMethod::find($data['payment_method_id'] ?? null);
+        if (!$paymentMethod) {
+            return response()->json([
+                'message' => 'Método de pagamento não encontrado.'
+            ], 404);
+        }
+
+        $card = $this->resolvePaymentCard($paymentMethod, $data);
+
+        try {
+            $isCredit = (int) ($data['payment_method_id'] ?? 0) === 8;
+            $cashTender = $card
+                ? ['amount_tendered' => null, 'change_amount' => null]
+                : $this->resolveOrderCashTender($data, (float) $data['total'], $isCredit);
+
+            DB::transaction(function () use ($data, $openCashRegister, $cashTender, $card) {
+                $order = Order::create([
+                    'user_id' => Auth::user()->id,
+                    'total' => $data['total'],
+                    'amount_tendered' => $cashTender['amount_tendered'],
+                    'change_amount' => $cashTender['change_amount'],
+                    'order_status_id' => 3,
+                    'cash_register_id' => $openCashRegister->id
+                ]);
+
+                foreach ($data['products'] as $item) {
+                    $product = Product::find($item['id']);
+
+                    $orderItem = OrderItem::create([
+                        'order_id' => $order->id,
+                        'product_id' => $item['id'],
+                        'department_id' => $product->department_id,
+                        'quantity' => $item['quantity'],
+                        'order_item_status_id' => 1,
+                        'price' => $product->price,
+                        'user_id' => Auth::user()->id,
+                        'total' => $product->price * $item['quantity'],
+                        'cash_register_id' => $openCashRegister->id
+                    ]);
+
+                    $this->debitPrincipalStock(
+                        (int) $item['id'],
+                        (int) $item['quantity'],
+                        \App\Models\StockMovement::REASON_SALE,
+                        OrderItem::class,
+                        (int) $orderItem->id
+                    );
+                }
+
+                $payment = Payment::create([
+                    "order_id" => $order->id,
+                    "payment_method_id" => $data["payment_method_id"],
+                    "amount" => $data['total'],
+                    "cash_register_id" => $openCashRegister->id,
+                    "user_id" => Auth::user()->id
+                ]);
+
+                if ($card) {
+                    $serverTotal = (float) OrderItem::where('order_id', $order->id)->sum('total');
+                    $this->assertServerTotalMatches($serverTotal, $data['total']);
+                    $this->chargePaymentCard($card, $serverTotal, $order, $payment, $openCashRegister->id);
+                }
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 400);
+        }
+
+        return response()->json([
+            "message" => "Pedido realizado com sucesso",
+            "card_balance" => $card?->fresh()->balance,
+        ]);
+        });
+    }
+    public function create()
+    {
+        //
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(Request $request)
+    {
+        //
+    }
+
+    /**
+     * Display the specified resource.
+     */
+    public function show(string $id)
+    {
+        //
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(string $id)
+    {
+        //
+    }
+
+    /**
+     * Update the specified resource in storage.
+     */
+    public function update(Request $request, string $id)
+    {
+        //
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(string $id)
+    {
+        //
+    }
+}
