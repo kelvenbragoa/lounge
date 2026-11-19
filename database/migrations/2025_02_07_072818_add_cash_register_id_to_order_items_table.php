@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::table('order_items', function (Blueprint $table) {
             //
-            $table->unsignedBigInteger('cash_register_id')->default(0);
+            // $table->unsignedBigInteger('cash_register_id')->default(0);
 
         });
     }
