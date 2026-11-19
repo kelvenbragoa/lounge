@@ -13,9 +13,9 @@ return new class extends Migration
     {
         Schema::table('order_items', function (Blueprint $table) {
             //
-            $table->unsignedBigInteger('prepared_by_user_id')->nullable();
-            $table->unsignedBigInteger('ready_by_user_id')->nullable();
-            $table->unsignedBigInteger('delivered_by_user_id')->nullable();
+            // $table->unsignedBigInteger('prepared_by_user_id')->nullable();
+            // $table->unsignedBigInteger('ready_by_user_id')->nullable();
+            // $table->unsignedBigInteger('delivered_by_user_id')->nullable();
 
         });
     }
