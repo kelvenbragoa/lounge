@@ -55,6 +55,30 @@ class UserTableSeeder extends Seeder
                 "created_at"=>now(),
                 "updated_at"=>now(),
             ],
+            [
+                "name"=>"Stock Manager",
+                "role_id"=>6,
+                "email"=>"stockmanager@test.com",
+                "password"=>bcrypt('12345678'),
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"Gestor de Mesas",
+                "role_id"=>7,
+                "email"=>"gestormesas@test.com",
+                "password"=>bcrypt('12345678'),
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"Caixa de Cartões",
+                "role_id"=>8,
+                "email"=>"caixacartoes@test.com",
+                "password"=>bcrypt('12345678'),
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
         ]);
     }
 }

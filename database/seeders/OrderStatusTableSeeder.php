@@ -30,6 +30,11 @@ class OrderStatusTableSeeder extends Seeder
                 "created_at"=>now(),
                 "updated_at"=>now(),
             ],
+            [
+                "name"=>"Credito",
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
         ]);
     }
 }

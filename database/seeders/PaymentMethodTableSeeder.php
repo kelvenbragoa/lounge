@@ -15,54 +15,61 @@ class PaymentMethodTableSeeder extends Seeder
     {
         //
         DB::table('payment_methods')->insert([
-            // [
-            //     "name"=>"Dinheiro",
-            //     "status_id"=>1,
-            //     "created_at"=>now(),
-            //     "updated_at"=>now(),
-            // ],
-            // [
-            //     "name"=>"Cartão",
-            //     "status_id"=>1,
-            //     "created_at"=>now(),
-            //     "updated_at"=>now(),
-            // ],
-            // // [
-            // //     "name"=>"Dividido",
-            // //     "status_id"=>1,
-            // //     "created_at"=>now(),
-            // //     "updated_at"=>now(),
-            // // ],
-            // [
-            //     "name"=>"Emola",
-            //     "status_id"=>1,
-            //     "created_at"=>now(),
-            //     "updated_at"=>now(),
-            // ],
-            // [
-            //     "name"=>"MPesa",
-            //     "status_id"=>1,
-            //     "created_at"=>now(),
-            //     "updated_at"=>now(),
-            // ],
-            // [
-            //     "name"=>"Mkesh",
-            //     "status_id"=>1,
-            //     "created_at"=>now(),
-            //     "updated_at"=>now(),
-            // ],
-            // [
-            //     "name"=>"Conta Movel",
-            //     "status_id"=>1,
-            //     "created_at"=>now(),
-            //     "updated_at"=>now(),
-            // ],
+            [
+                "name"=>"Dinheiro",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"Cartão",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"Emola",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"MPesa",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"Mkesh",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"Conta Movel",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
             [
                 "name"=>"Consumo Interno",
                 "status_id"=>1,
                 "created_at"=>now(),
                 "updated_at"=>now(),
             ],
+            [
+                "name"=>"Credito",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+            [
+                "name"=>"Cartão Lounge",
+                "status_id"=>1,
+                "created_at"=>now(),
+                "updated_at"=>now(),
+            ],
+
         ]);
     }
 }
