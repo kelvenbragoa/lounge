@@ -154,7 +154,8 @@ class CashRegisterController extends Controller
     $cashRegister = CashRegister::create([
         'user_id' => Auth::id(),
         'cash_register_status_id' => 1,
-        'opening_balance' => $data['opening_balance'],
+        // Sem dinheiro não há fundo inicial.
+        'opening_balance' => CashRegister::isCashless() ? 0 : ($data['opening_balance'] ?? 0),
         'opened_at' => now(),
     ]);
 
@@ -293,12 +294,19 @@ class CashRegisterController extends Controller
         $totalSales = OrderItem::where('cash_register_id', $cashRegister->id)
             ->sum('total');
 
+        if (! CashRegister::isCashless() && ! isset($data['closing_balance'])) {
+            return response()->json(['message' => 'Indique o saldo final.'], 422);
+        }
+
+        // Sem dinheiro (só cartão) o fecho é automático; caso contrário usa o valor contado.
+        $figures = CashRegister::closingFigures((float) $totalSales, $data['closing_balance'] ?? null);
+
         // Atualizar informações do caixa
         $cashRegister->update([
-            'closing_balance' => $data['closing_balance'],
+            'closing_balance' => $figures['closing_balance'],
             'automatic_closing_balance' => $totalSales,
             'closed_at' => now(),
-            'difference'=> $totalSales - $data['closing_balance'],
+            'difference'=> $figures['difference'],
             'cash_register_status_id' => 2 // 2 = Fechado
         ]);
 

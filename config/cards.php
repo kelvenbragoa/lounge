@@ -15,6 +15,14 @@ return [
     'exclusive_payment' => (bool) env('CARD_EXCLUSIVE_PAYMENT', false),
 
     /*
+    | Em modo exclusivo, perfis que podem lançar "Consumo Interno" (venda sem pagamento).
+    | Por omissão só administrador (1) e supervisor (2); os garçons não.
+    */
+    'internal_consumption_roles' => array_map('intval', array_filter(
+        explode(',', (string) env('CARD_INTERNAL_CONSUMPTION_ROLES', '1,2'))
+    )),
+
+    /*
     | true: abrir uma mesa exige associar um cartão (o saldo passa a limitar o consumo da mesa).
     */
     'require_card_on_table_open' => (bool) env('CARD_REQUIRE_ON_TABLE_OPEN', false),

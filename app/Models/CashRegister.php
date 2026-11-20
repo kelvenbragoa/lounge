@@ -37,6 +37,33 @@ class CashRegister extends Model
 
     public const KIND_SALES = 'sales';
     public const KIND_CARDS = 'cards';
+
+    /**
+     * Em modo exclusivo (só cartão) quem vende não manuseia dinheiro: o caixa de vendas é
+     * apenas um turno, sem fundo inicial nem contagem no fecho. O dinheiro vive nos
+     * turnos do caixa de cartões.
+     */
+    public static function isCashless(): bool
+    {
+        return (bool) config('cards.exclusive_payment');
+    }
+
+    /**
+     * Valores a gravar no fecho. Sem dinheiro: o fecho é automático (sem diferença).
+     * Com dinheiro: usa o valor contado pelo operador e a diferença face ao sistema.
+     *
+     * @return array{closing_balance: float, difference: float}
+     */
+    public static function closingFigures(float $systemTotal, mixed $declared): array
+    {
+        if (self::isCashless()) {
+            return ['closing_balance' => $systemTotal, 'difference' => 0.0];
+        }
+
+        $declared = (float) $declared;
+
+        return ['closing_balance' => $declared, 'difference' => $systemTotal - $declared];
+    }
     public function orderitens()
     {
         return $this->hasMany(OrderItem::class);

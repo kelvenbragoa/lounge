@@ -16,7 +16,8 @@ use RuntimeException;
 trait ProcessesCardPayments
 {
     /**
-     * Métodos que o PDV pode mostrar. Em modo exclusivo: só cartão e consumo interno.
+     * Métodos que o PDV pode mostrar. Em modo exclusivo: cartão e, só para os perfis
+     * autorizados, consumo interno.
      */
     protected function saleablePaymentMethods(): Collection
     {
@@ -35,8 +36,22 @@ trait ProcessesCardPayments
             return true;
         }
 
-        // Consumo interno: não é receita nem crédito, logo não envolve dinheiro do cliente.
-        return (int) $method->counts_in_revenue === 0 && (int) $method->is_credit === 0;
+        return $this->isInternalConsumption($method) && $this->canUseInternalConsumption();
+    }
+
+    /**
+     * Consumo interno: não é receita nem crédito, logo não envolve dinheiro do cliente.
+     */
+    protected function isInternalConsumption(PaymentMethod $method): bool
+    {
+        return (int) $method->is_card !== 1
+            && (int) $method->counts_in_revenue === 0
+            && (int) $method->is_credit === 0;
+    }
+
+    protected function canUseInternalConsumption(): bool
+    {
+        return in_array((int) Auth::user()?->role_id, config('cards.internal_consumption_roles', []), true);
     }
 
     /**
@@ -46,6 +61,14 @@ trait ProcessesCardPayments
     {
         if ((int) $method->is_card !== 1) {
             if (! $this->isPaymentMethodAllowed($method)) {
+                if ($this->isInternalConsumption($method)) {
+                    throw new CardException(
+                        'O consumo interno só pode ser lançado por um supervisor ou administrador.',
+                        'internal_consumption_forbidden',
+                        403
+                    );
+                }
+
                 throw new CardException('O pagamento é exclusivamente por cartão. Leia o cartão do cliente.', 'card_payment_required');
             }
 

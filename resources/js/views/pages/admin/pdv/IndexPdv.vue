@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useToast } from 'primevue/usetoast';
 import { debounce } from 'lodash-es';
 import moment from 'moment';
+import { loadCardSettings } from '@/utils/cards';
 
 let interval;
 const router = useRouter();
@@ -23,6 +24,8 @@ const closeCashRegisterDialog = ref(false);
 const openListQuickSellDialog = ref(false);
 const openingBalance = ref(0);
 const totalcash = ref(0);
+// Só cartão: o caixa não manuseia dinheiro, por isso abre e fecha sem valores.
+const cashless = ref(false);
 const quicksells = ref([]);
 const totalRecordsQuickSell = ref(0);
 const isLoadingQuickSell = ref(false);
@@ -248,7 +251,7 @@ const getDataQuickSells = async (page = 1) => {
 function openCashRegister() {
     axios
         .post('/api/cashregisters/open', {
-            opening_balance: openingBalance.value
+            opening_balance: cashless.value ? 0 : openingBalance.value
         })
         .then((response) => {
             openCashRegisterDialog.value = false;
@@ -273,9 +276,7 @@ function openCashRegister() {
 
 function closeCashRegister() {
     axios
-        .post('/api/cashregisters/close', {
-            closing_balance: totalcash.value
-        })
+        .post('/api/cashregisters/close', cashless.value ? {} : { closing_balance: totalcash.value })
         .then(() => {
             closeCashRegisterDialog.value = false;
             cashregister.value = null;
@@ -310,6 +311,11 @@ const debouncedSearch = debounce(() => {
 watch(searchQuery, debouncedSearch);
 
 onMounted(() => {
+    loadCardSettings()
+        .then((settings) => {
+            cashless.value = !!settings.exclusive_payment;
+        })
+        .catch(() => {});
     getData();
     getDataQuickSells();
     interval = setInterval(() => {
@@ -504,17 +510,22 @@ onUnmounted(() => {
         :style="{ width: '24rem' }"
         modal
     >
-        <label for="opening_balance" class="block font-medium mb-2">Saldo inicial (MZN)</label>
-        <InputNumber
-            v-model="openingBalance"
-            inputId="opening_balance"
-            mode="currency"
-            currency="MZN"
-            locale="pt-MZ"
-            :min="-1"
-            placeholder="0.00"
-            class="w-full"
-        />
+        <p v-if="cashless" class="m-0 text-color-secondary">
+            Pagamento só por cartão: o caixa abre sem fundo inicial. Inicie o turno para começar a vender.
+        </p>
+        <template v-else>
+            <label for="opening_balance" class="block font-medium mb-2">Saldo inicial (MZN)</label>
+            <InputNumber
+                v-model="openingBalance"
+                inputId="opening_balance"
+                mode="currency"
+                currency="MZN"
+                locale="pt-MZ"
+                :min="-1"
+                placeholder="0.00"
+                class="w-full"
+            />
+        </template>
         <template #footer>
             <Button label="Cancelar" text @click="openCashRegisterDialog = false" />
             <Button label="Abrir caixa" icon="pi pi-check" @click="openCashRegister" />
@@ -527,17 +538,22 @@ onUnmounted(() => {
         :style="{ width: '24rem' }"
         modal
     >
-        <label for="closing_balance" class="block font-medium mb-2">Saldo final (MZN)</label>
-        <InputNumber
-            v-model="totalcash"
-            inputId="closing_balance"
-            mode="currency"
-            currency="MZN"
-            locale="pt-MZ"
-            :min="-1"
-            placeholder="0.00"
-            class="w-full"
-        />
+        <p v-if="cashless" class="m-0 text-color-secondary">
+            Pagamento só por cartão: o fecho é automático, sem contagem de dinheiro. Confirme para terminar o turno.
+        </p>
+        <template v-else>
+            <label for="closing_balance" class="block font-medium mb-2">Saldo final (MZN)</label>
+            <InputNumber
+                v-model="totalcash"
+                inputId="closing_balance"
+                mode="currency"
+                currency="MZN"
+                locale="pt-MZ"
+                :min="-1"
+                placeholder="0.00"
+                class="w-full"
+            />
+        </template>
         <template #footer>
             <Button label="Cancelar" text @click="closeCashRegisterDialog = false" />
             <Button label="Fechar caixa" icon="pi pi-check" severity="danger" @click="closeCashRegister" />

@@ -149,24 +149,89 @@ class CardPaymentFlowTest extends TestCase
             ->assertJsonPath('code', 'card_required');
     }
 
-    public function test_exclusive_mode_blocks_other_methods_but_allows_internal_consumption(): void
+    private function internalMethod(): PaymentMethod
+    {
+        return PaymentMethod::where('is_card', 0)->where('counts_in_revenue', 0)->where('is_credit', 0)->first()
+            ?? PaymentMethod::create([
+                'name' => 'Consumo Interno', 'status_id' => 1,
+                'counts_in_revenue' => 0, 'is_credit' => 0, 'is_card' => 0,
+            ]);
+    }
+
+    private function headersForRole(int $roleId, bool $openRegister = true): array
+    {
+        $user = User::factory()->create(['role_id' => $roleId]);
+
+        if ($openRegister) {
+            CashRegister::create([
+                'user_id' => $user->id, 'cash_register_status_id' => 1, 'opening_balance' => 0, 'opened_at' => now(),
+            ]);
+        }
+
+        return ['token' => $user->createToken('test')->plainTextToken, 'Accept' => 'application/json'];
+    }
+
+    public function test_exclusive_mode_blocks_cash_and_hides_internal_consumption_from_waiters(): void
     {
         config(['cards.exclusive_payment' => true]);
 
         $cash = PaymentMethod::where('is_card', 0)->where('counts_in_revenue', 1)->where('is_credit', 0)->first();
-        $internal = PaymentMethod::where('is_card', 0)->where('counts_in_revenue', 0)->where('is_credit', 0)->first();
+        $internal = $this->internalMethod();
 
         $this->quicksell(1, ['payment_method_id' => $cash->id, 'card_uid' => null])
             ->assertStatus(422)
             ->assertJsonPath('code', 'card_payment_required');
 
-        if ($internal) {
-            $this->quicksell(1, ['payment_method_id' => $internal->id, 'card_uid' => null])->assertOk();
-        }
+        $this->quicksell(1, ['payment_method_id' => $internal->id, 'card_uid' => null])
+            ->assertStatus(403)
+            ->assertJsonPath('code', 'internal_consumption_forbidden');
+        $this->assertSame(100, $this->stock());
 
         $this->getJson('/api/pdv/quicksell', $this->headers)
             ->assertOk()
-            ->assertJsonMissing(['id' => $cash->id, 'name' => $cash->name]);
+            ->assertJsonMissing(['id' => $cash->id, 'name' => $cash->name])
+            ->assertJsonMissing(['id' => $internal->id, 'name' => $internal->name]);
+
+        $this->getJson('/api/mobile-payment-methods', $this->headers)
+            ->assertOk()
+            ->assertJsonMissing(['id' => $internal->id, 'name' => $internal->name]);
+    }
+
+    public function test_exclusive_mode_lets_supervisor_register_internal_consumption(): void
+    {
+        config(['cards.exclusive_payment' => true]);
+        $internal = $this->internalMethod();
+        $supervisor = $this->headersForRole(User::ROLE_SUPERVISOR);
+
+        $this->postJson('/api/pdv/quicksell', [
+            'payment_method_id' => $internal->id,
+            'products' => [['id' => $this->productId, 'quantity' => 1]],
+            'total' => 150,
+        ], $supervisor)->assertOk();
+
+        $this->assertSame(99, $this->stock());
+
+        $this->getJson('/api/pdv/quicksell', $supervisor)
+            ->assertOk()
+            ->assertJsonFragment(['id' => $internal->id]);
+    }
+
+    public function test_internal_consumption_roles_are_configurable(): void
+    {
+        config(['cards.exclusive_payment' => true, 'cards.internal_consumption_roles' => [User::ROLE_ADMIN]]);
+        $internal = $this->internalMethod();
+
+        $this->postJson('/api/pdv/quicksell', [
+            'payment_method_id' => $internal->id,
+            'products' => [['id' => $this->productId, 'quantity' => 1]],
+            'total' => 150,
+        ], $this->headersForRole(User::ROLE_SUPERVISOR))->assertStatus(403);
+
+        $this->postJson('/api/pdv/quicksell', [
+            'payment_method_id' => $internal->id,
+            'products' => [['id' => $this->productId, 'quantity' => 1]],
+            'total' => 150,
+        ], $this->headersForRole(User::ROLE_ADMIN))->assertOk();
     }
 
     public function test_table_flow_with_card_limits_consumption_and_pays_with_linked_card(): void

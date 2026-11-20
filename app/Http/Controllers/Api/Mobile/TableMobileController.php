@@ -352,12 +352,19 @@ class TableMobileController extends Controller
         $totalSales = OrderItem::where('cash_register_id', $cashRegister->id)
             ->sum('total');
 
+        if (! CashRegister::isCashless() && ! isset($data['closing_balance'])) {
+            return response()->json(['message' => 'Indique o valor total de venda.'], 422);
+        }
+
+        // Sem dinheiro (só cartão) o fecho é automático; caso contrário usa o valor contado.
+        $figures = CashRegister::closingFigures((float) $totalSales, $data['closing_balance'] ?? null);
+
         // Atualizar informações do caixa
         $cashRegister->update([
-            'closing_balance' => $data['closing_balance'],
+            'closing_balance' => $figures['closing_balance'],
             'automatic_closing_balance' => $totalSales,
             'closed_at' => now(),
-            'difference' => $totalSales - $data['closing_balance'],
+            'difference' => $figures['difference'],
             'cash_register_status_id' => 2 // 2 = Fechado
         ]);
 

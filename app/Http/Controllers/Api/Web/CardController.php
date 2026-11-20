@@ -207,6 +207,8 @@ class CardController extends Controller
         return response()->json([
             'deposit_amount' => (float) config('cards.deposit_amount'),
             'max_topup_amount' => (float) config('cards.max_topup_amount'),
+            // Só cartão: o caixa de vendas não manuseia dinheiro (sem saldo inicial nem contagem).
+            'exclusive_payment' => (bool) config('cards.exclusive_payment'),
             'tender_methods' => collect(config('cards.tender_methods'))
                 ->map(fn ($label, $key) => ['id' => $key, 'name' => $label])
                 ->values(),

@@ -34,6 +34,10 @@ const cashRegister = computed(() => details.value?.cash_register ?? null);
 const user = computed(() => details.value?.user ?? null);
 const status = computed(() => details.value?.status ?? null);
 const metrics = computed(() => details.value?.metrics ?? {});
+// Turno sem dinheiro (só cartão): sem fundo inicial e sem diferença. O dinheiro está nos turnos do caixa de cartões.
+const noCashHandled = computed(
+    () => Number(cashRegister.value?.opening_balance ?? 0) === 0 && Number(cashRegister.value?.difference ?? 0) === 0
+);
 const paymentsByMethod = computed(() => details.value?.payments_by_method ?? []);
 
 const cashRegisterId = computed(() => router.currentRoute.value.params.id);
@@ -212,7 +216,7 @@ onMounted(async () => {
                     :value="status.name"
                     :severity="getStatusSeverity(status?.id)"
                 />
-                <span class="crshow-status__meta">Saldo inicial: {{ formatMoney(cashRegister?.opening_balance) }} MT</span>
+                <span v-if="!noCashHandled" class="crshow-status__meta">Saldo inicial: {{ formatMoney(cashRegister?.opening_balance) }} MT</span>
             </section>
 
             <section class="crshow-kpis">
@@ -244,7 +248,11 @@ onMounted(async () => {
 
             <section class="crshow-info">
                 <h3>Fecho de caixa</h3>
-                <div class="crshow-info__grid">
+                <div v-if="noCashHandled" class="crshow-info__grid">
+                    <p><strong>Total do turno:</strong> {{ formatMoney(cashRegister?.automatic_closing_balance) }} MT</p>
+                    <p>Turno sem dinheiro: os pagamentos foram feitos por cartão. O dinheiro está nos turnos do caixa de cartões.</p>
+                </div>
+                <div v-else class="crshow-info__grid">
                     <p><strong>Saldo esperado:</strong> {{ formatMoney(metrics.expected_balance) }} MT</p>
                     <p><strong>Saldo sistema:</strong> {{ formatMoney(cashRegister?.automatic_closing_balance) }} MT</p>
                     <p><strong>Saldo declarado:</strong> {{ formatMoney(cashRegister?.closing_balance) }} MT</p>
