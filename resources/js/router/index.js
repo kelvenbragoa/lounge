@@ -619,6 +619,12 @@ const router = createRouter({
                     component: () => import('@/views/pages/admin/cashregisters/DailyDashboard.vue')
                 },
                 {
+                    path: '/admin/apps',
+                    name: 'admin.apps',
+                    meta: { requiresAuth: true },
+                    component: () => import('@/views/pages/admin/apps/IndexAppReleases.vue')
+                },
+                {
                     path: '/admin/cards/dashboard',
                     name: 'admin.cards.dashboard',
                     meta: { requiresAuth: true },

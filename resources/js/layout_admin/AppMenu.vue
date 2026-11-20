@@ -55,6 +55,7 @@ const model = ref([
                             { label: 'Usuários', icon: 'pi pi-fw pi-user', to: '/admin/users' },
                             { label: 'Ponto de Venda', icon: 'pi pi-fw pi-shopping-cart', to: '/admin/pdv' },
                             { label: 'Caixa', icon: 'pi pi-fw pi-box', to: '/admin/cashregisters' },
+                            { label: 'Aplicação móvel', icon: 'pi pi-fw pi-android', to: '/admin/apps' },
                         ]
                     },
                     {

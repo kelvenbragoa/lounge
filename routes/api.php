@@ -26,6 +26,8 @@ use App\Http\Controllers\Api\Web\SubCategoryController;
 use App\Http\Controllers\Api\Web\SuppliersController;
 use App\Http\Controllers\Api\Web\TableController;
 use App\Http\Controllers\Api\Web\UserController;
+use App\Http\Controllers\Api\AppUpdateController;
+use App\Http\Controllers\Api\Web\AdminAppsController;
 use App\Http\Middleware\Sanctum;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -38,6 +40,9 @@ Route::post('login',[AuthWebController::class,'login']);
 Route::post('/barman-login', [AuthMobileController::class, 'login']);
 
 Route::get('menu-digital', [MenuDigitalController::class, 'index']);
+
+Route::get('apps/{slug}/latest', [AppUpdateController::class, 'latest']);
+Route::get('apps/{slug}/download/{versionCode}.apk', [AppUpdateController::class, 'download'])->whereNumber('versionCode');
 
 
 Route::middleware([Sanctum::class])->group(function () {
@@ -222,6 +227,12 @@ Route::middleware([Sanctum::class])->group(function () {
         Route::get('card-shifts', [CardReportController::class, 'shifts']);
         Route::get('card-shifts/{cardShift}', [CardReportController::class, 'shift'])->whereNumber('cardShift');
         Route::get('card-transactions', [CardReportController::class, 'transactions']);
+    });
+
+    Route::middleware('role:1')->group(function () {
+        Route::get('admin-apps', [AdminAppsController::class, 'index']);
+        Route::post('admin-apps/{slug}', [AdminAppsController::class, 'update']);
+        Route::post('admin-apps/{slug}/releases', [AdminAppsController::class, 'storeRelease']);
     });
 
 
