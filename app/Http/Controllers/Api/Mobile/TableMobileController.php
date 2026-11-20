@@ -205,10 +205,17 @@ class TableMobileController extends Controller
         $table = Table::find($id);
         $order = Order::where('table_id', $id)->where('order_status_id', 1)->first();
 
-        if ($order->user_id != Auth::user()->id) {
+        // Sem conta aberta (já fechada noutro aparelho, ou mesa livre): nada para fechar.
+        if (! $table || ! $order) {
             return response()->json([
-                'message' => "Impossivel adicionar itens a esta mesa. Esta mesa foi aberta por" . $order->user->name
-            ], 400); // Código HTTP 403 - Proibido
+                'message' => 'Esta mesa não tem conta aberta.',
+            ], 404);
+        }
+
+        if ($order->user_id != Auth::id()) {
+            return response()->json([
+                'message' => 'Não é possível fechar a conta desta mesa. Foi aberta por '.($order->user?->name ?? 'outro garçom').'.',
+            ], 400);
         }
 
 
@@ -466,7 +473,9 @@ class TableMobileController extends Controller
                 ? ['amount_tendered' => null, 'change_amount' => null]
                 : $this->resolveOrderCashTender($data, (float) $data['total'], $isCredit);
 
-            DB::transaction(function () use ($data, $openCashRegister, $cashTender, $card) {
+            $order = null;
+
+            DB::transaction(function () use ($data, $openCashRegister, $cashTender, $card, &$order) {
                 $order = Order::create([
                     'user_id' => Auth::user()->id,
                     'total' => $data['total'],
@@ -520,8 +529,8 @@ class TableMobileController extends Controller
 
         return response()->json([
             "message" => "Pedido realizado com sucesso",
-            "card_balance" => $card?->fresh()->balance,
-        ]);
+            "order_id" => $order->id,
+        ] + $this->cardPaymentSummary($card, $order->id));
         });
     }
     public function create()

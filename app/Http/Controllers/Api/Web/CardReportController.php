@@ -63,7 +63,8 @@ class CardReportController extends Controller
             'shift' => $cardShift->load('user:id,name'),
             'summary' => $this->cards->shiftSummary($cardShift),
             'transactions' => $cardShift->transactions()
-                ->with(['card:id,uid,code,holder_name', 'user:id,name'])
+                ->withStatement()
+                ->with('card:id,uid,code,holder_name')
                 ->orderByDesc('id')
                 ->get(),
         ]);
@@ -82,7 +83,8 @@ class CardReportController extends Controller
         $types = array_filter(explode(',', (string) $request->input('type')));
 
         $transactions = CardTransaction::query()
-            ->with(['card:id,uid,code,holder_name', 'user:id,name'])
+            ->withStatement()
+            ->with('card:id,uid,code,holder_name')
             ->when($userId, fn ($query) => $query->where('user_id', $userId))
             ->when($types, fn ($query) => $query->whereIn('type', $types))
             ->when($request->filled('tender_method'), fn ($query) => $query->where('tender_method', $request->input('tender_method')))

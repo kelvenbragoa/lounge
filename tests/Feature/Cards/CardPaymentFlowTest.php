@@ -10,6 +10,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\User;
+use App\Services\CardReceiptService;
 use App\Services\CardService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -393,5 +394,139 @@ class CardPaymentFlowTest extends TestCase
 
         $this->assertEquals(750, $this->card->fresh()->balance);
         $this->assertSame(99, $this->stock());
+    }
+
+    public function test_mobile_close_account_without_open_order_returns_404(): void
+    {
+        $this->getJson("/api/closeaccount/{$this->tableId}", $this->headers)
+            ->assertNotFound()
+            ->assertJsonPath('message', 'Esta mesa não tem conta aberta.');
+    }
+
+    public function test_mobile_close_account_refuses_table_opened_by_another_waiter(): void
+    {
+        $owner = User::factory()->create(['role_id' => User::ROLE_WAITER]);
+        Order::create([
+            'table_id' => $this->tableId,
+            'user_id' => $owner->id,
+            'total' => 0,
+            'order_status_id' => 1,
+        ]);
+
+        $this->getJson("/api/closeaccount/{$this->tableId}", $this->headers)
+            ->assertStatus(400)
+            ->assertJsonPath('message', 'Não é possível fechar a conta desta mesa. Foi aberta por '.$owner->name.'.');
+
+        $this->assertSame(1, Order::where('table_id', $this->tableId)->where('order_status_id', 1)->count());
+    }
+
+    public function test_card_payment_response_carries_receipt_data(): void
+    {
+        $response = $this->quicksell(2)->assertOk();
+
+        $response->assertJsonPath('card_balance_before', 900)
+            ->assertJsonPath('card_balance_after', 600)
+            ->assertJsonPath('card_uid_masked', '****'.substr($this->card->uid, -4));
+
+        $transaction = CardTransaction::find($response->json('card_transaction_id'));
+        $this->assertSame('purchase', $transaction->type);
+        $this->assertSame((int) $response->json('order_id'), (int) $transaction->order_id);
+    }
+
+    public function test_mobile_quicksell_returns_order_and_receipt_data(): void
+    {
+        $this->postJson('/api/mobile-savequicksell', [
+            'payment_method_id' => (string) $this->cardMethodId,
+            'products' => [['id' => $this->productId, 'quantity' => 1]],
+            'total' => 150,
+            'card_uid' => $this->card->uid,
+            'request_id' => (string) Str::uuid(),
+        ], $this->headers)
+            ->assertOk()
+            ->assertJsonPath('card_balance_before', 900)
+            ->assertJsonPath('card_balance_after', 750)
+            ->assertJsonStructure(['order_id', 'card_transaction_id', 'card_uid_masked']);
+    }
+
+    public function test_lookup_statement_lists_products_and_masks_uid(): void
+    {
+        $this->quicksell(2)->assertOk();
+
+        $response = $this->postJson('/api/cards/lookup', ['uid' => $this->card->uid], $this->headers)->assertOk();
+
+        $response->assertJsonPath('card.uid_masked', '****'.substr($this->card->uid, -4));
+
+        $purchase = collect($response->json('transactions'))->firstWhere('type', 'purchase');
+        $this->assertEquals(600, $purchase['balance_after']);
+        $this->assertSame('Cerveja', $purchase['items'][0]['product']['name']);
+        $this->assertSame(2, (int) $purchase['items'][0]['quantity']);
+    }
+
+    public function test_receipt_pdf_permissions(): void
+    {
+        $id = $this->quicksell(1)->assertOk()->json('card_transaction_id');
+
+        // o garçom que cobrou imprime o seu recibo
+        $own = $this->get("/api/cards/transactions/{$id}/receipt", $this->headers)->assertOk();
+        $this->assertStringContainsString('application/pdf', $own->headers->get('content-type'));
+
+        // outro garçom não
+        $other = User::factory()->create(['role_id' => User::ROLE_WAITER]);
+        $this->get("/api/cards/transactions/{$id}/receipt?copy=1", [
+            'token' => $other->createToken('t')->plainTextToken, 'Accept' => 'application/json',
+        ])->assertForbidden();
+
+        // caixa de cartões imprime qualquer um (2ª via)
+        $cashier = User::factory()->create(['role_id' => User::ROLE_CARD_CASHIER]);
+        $this->get("/api/cards/transactions/{$id}/receipt?copy=1", [
+            'token' => $cashier->createToken('t')->plainTextToken, 'Accept' => 'application/json',
+        ])->assertOk();
+    }
+
+    public function test_replace_response_exposes_transfer_for_receipt(): void
+    {
+        $cashier = User::factory()->create(['role_id' => User::ROLE_CARD_CASHIER]);
+        app(CardService::class)->openShift($cashier);
+        $headers = ['token' => $cashier->createToken('t')->plainTextToken, 'Accept' => 'application/json'];
+
+        $response = $this->postJson("/api/cards/{$this->card->id}/replace", [
+            'new_uid' => 'FACE'.bin2hex(random_bytes(4)),
+            'request_id' => (string) Str::uuid(),
+        ], $headers)->assertOk();
+
+        $transferId = $response->json('transactions.0.id');
+        $this->assertSame('transfer_in', $response->json('transactions.0.type'));
+
+        $data = app(CardReceiptService::class)->data(CardTransaction::find($transferId));
+        $this->assertSame('transfer_in', $data['kind']);
+        $this->assertSame('900,00 MT', $data['balance_after']);
+        $this->get("/api/cards/transactions/{$transferId}/receipt", $headers)->assertOk();
+    }
+
+    public function test_receipt_data_for_topup_and_refund(): void
+    {
+        $service = app(CardService::class);
+        $receipts = app(CardReceiptService::class);
+        $cashier = User::factory()->create(['role_id' => User::ROLE_CARD_CASHIER]);
+        $service->openShift($cashier);
+
+        $card = $service->register(['uid' => 'BEEF'.bin2hex(random_bytes(4)), 'holder_name' => 'Maria Joao'], $cashier);
+        $topup = $service->topup($card, 500, 'mpesa', $cashier, (string) Str::uuid());
+
+        $data = $receipts->data($topup['transactions']->first());
+        $this->assertSame('topup', $data['kind']);
+        $this->assertSame('****'.substr($card->uid, -4), $data['card_masked']);
+        $this->assertSame('Maria Joao', $data['holder_name']);
+        $this->assertSame('0,00 MT', $data['balance_before']);
+        $this->assertSame('400,00 MT', $data['balance_after']);
+        $this->assertContains(['Valor recebido', '500,00 MT', true], $data['rows']);
+        $this->assertContains(['Caução retida', '100,00 MT'], $data['rows']);
+
+        $refund = $service->refund($card->fresh(), $cashier, (string) Str::uuid());
+        $data = $receipts->data($refund['transactions']->first());
+        $this->assertSame('refund', $data['kind']);
+        $this->assertSame('400,00 MT', $data['balance_before']);
+        $this->assertSame('0,00 MT', $data['balance_after']);
+        $this->assertContains(['Total entregue', '500,00 MT', true], $data['rows']);
     }
 }

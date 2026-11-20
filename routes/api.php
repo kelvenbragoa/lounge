@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\Mobile\AuthMobileController;
 use App\Http\Controllers\Api\Mobile\TableMobileController;
 use App\Http\Controllers\Api\Web\AuthWebController;
 use App\Http\Controllers\Api\Web\CardController;
+use App\Http\Controllers\Api\Web\CardReceiptController;
 use App\Http\Controllers\Api\Web\CardReportController;
 use App\Http\Controllers\Api\Web\CardShiftController;
 use App\Http\Controllers\Api\Web\CashRegisterController;
@@ -206,6 +207,7 @@ Route::middleware([Sanctum::class])->group(function () {
     Route::middleware('role:1,2,3,5,7,8')->group(function () {
         Route::get('cards/settings', [CardController::class, 'settings']);
         Route::post('cards/lookup', [CardController::class, 'lookup']);
+        Route::get('cards/transactions/{transaction}/receipt', [CardReceiptController::class, 'show'])->whereNumber('transaction');
     });
 
     Route::middleware('role:1,2,8')->group(function () {

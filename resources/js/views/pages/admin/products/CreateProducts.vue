@@ -36,6 +36,7 @@ const schema = yup.object({
     category_id: yup.string().required().trim().label('Categoria'),
     name: yup.string().required().trim().label('Name'),
     price: yup.string().required().trim().label('Preco'),
+    buy_price: yup.string().required().trim().label('Preco de Compra'),
     sub_category_id: yup.string().required().trim().label('Name'),
 });
 const { defineField, handleSubmit, resetForm, errors, setErrors } = useForm({
@@ -44,6 +45,7 @@ const { defineField, handleSubmit, resetForm, errors, setErrors } = useForm({
 const [category_id] = defineField('category_id');
 const [sub_category_id] = defineField('sub_category_id');
 const [price] = defineField('price');
+const [buy_price] = defineField('buy_price');
 const [name] = defineField('name');
 
 const image = ref();
@@ -106,7 +108,7 @@ const onSubmit = handleSubmit((values) => {
         })
         .catch((error) => {
             isLoadingButton.value = false;
-            toast.add({ severity: 'error', summary: `Erro}`, detail: `${error.response.data.message}`, life: 3000 });
+            toast.add({ severity: 'error', summary: `Erro`, detail: `${error.response.data.message}`, life: 3000 });
             if (error.response.data.errors) {
                 setErrors(error.response.data.errors);
             }
@@ -208,10 +210,15 @@ onMounted(() => {
 
                     </div>
                     <div class="flex flex-col gap-2">
-                        <label for="name1">Preço</label>
+                        <label for="name1">Preço de Venda</label>
                         <InputText v-model="price" id="price" placeholder="Preço" :class="{ 'p-invalid': errors.price }" type="number" />
                         <small id="price-help" class="p-error">{{ errors.price }}</small>
 
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <label for="name1">Preço de Compra</label>
+                        <InputText v-model="buy_price" id="buy_price" placeholder="Preço de Compra" :class="{ 'p-invalid': errors.buy_price }" type="number" />
+                        <small id="buy_price-help" class="p-error">{{ errors.buy_price }}</small>
                     </div>
                     <div class="flex flex-col gap-2">
                         <label for="name1">Categoria</label>

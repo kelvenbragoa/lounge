@@ -4,7 +4,7 @@ import { useToast } from 'primevue/usetoast';
 import { debounce } from 'lodash-es';
 import CardSummary from '@/components/cards/CardSummary.vue';
 import CardTransactionsTable from '@/components/cards/CardTransactionsTable.vue';
-import { CARD_STATUS, apiErrorMessage, cardStatus, formatDateTime, formatMt } from '@/utils/cards';
+import { CARD_STATUS, apiErrorMessage, cardStatus, cardUidLabel, formatDateTime, formatMt } from '@/utils/cards';
 
 const toast = useToast();
 
@@ -92,7 +92,7 @@ onMounted(load);
             @row-click="(e) => openDetail(e.data)"
         >
             <template #empty>Nenhum cartão encontrado.</template>
-            <Column field="uid" header="UID"><template #body="{ data }"><span class="font-mono">{{ data.uid }}</span></template></Column>
+            <Column field="uid" header="Cartão"><template #body="{ data }"><span class="font-mono">{{ cardUidLabel(data) }}</span></template></Column>
             <Column field="code" header="Código" />
             <Column field="holder_name" header="Cliente" />
             <Column field="holder_phone" header="Telefone" />

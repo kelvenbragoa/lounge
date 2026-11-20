@@ -3,10 +3,11 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import { useRoute } from 'vue-router';
 import CardReaderInput from '@/components/cards/CardReaderInput.vue';
+import CardReceiptDialog from '@/components/cards/CardReceiptDialog.vue';
 import CardSummary from '@/components/cards/CardSummary.vue';
 import CardTransactionsTable from '@/components/cards/CardTransactionsTable.vue';
 import { createRequestId } from '@/utils/requestId';
-import { apiErrorMessage, cardDisplayName, formatDateTime, formatMt, isNetworkError, loadCardSettings, lookupCard } from '@/utils/cards';
+import { apiErrorMessage, cardDisplayName, formatDateTime, formatMt, isNetworkError, loadCardSettings, lookupCard, maskUid } from '@/utils/cards';
 
 const toast = useToast();
 const route = useRoute();
@@ -43,6 +44,10 @@ const replaceRequestId = ref(null);
 
 const openShiftDialog = ref(false);
 const openingBalance = ref(0);
+
+// Recibo opcional da última operação (recarga, devolução, substituição): o cliente pode não o querer.
+const lastReceipt = ref(null);
+const receiptVisible = ref(false);
 
 const missingDeposit = computed(() => {
     if (!card.value || !settings.value) return 0;
@@ -84,6 +89,7 @@ async function loadShift() {
 async function readCard(uid) {
     reading.value = true;
     notFoundUid.value = null;
+    lastReceipt.value = null;
     try {
         const data = await lookupCard(uid);
         setCard(data.card, data.transactions);
@@ -118,6 +124,7 @@ async function refreshCard() {
 }
 
 function clearCard() {
+    lastReceipt.value = null;
     card.value = null;
     transactions.value = [];
     notFoundUid.value = null;
@@ -155,6 +162,10 @@ async function reactivateReturned() {
     }
 }
 
+function offerReceipt(label, transactionId) {
+    lastReceipt.value = transactionId ? { label, transactionId } : null;
+}
+
 function askTopup() {
     if (!Number(topupAmount.value)) return notify('Indique o valor recebido.', 'warn');
     if (topupError.value) return notify(topupError.value, 'warn');
@@ -172,6 +183,7 @@ async function confirmTopup() {
         });
         topupConfirm.value = false;
         notify(response.data.message);
+        offerReceipt('Recarga', response.data.transactions?.[0]?.id);
         card.value = response.data.card;
         topupAmount.value = null;
         topupRequestId.value = null;
@@ -192,6 +204,7 @@ async function confirmRefund() {
         refundConfirm.value = false;
         refundRequestId.value = null;
         notify(response.data.message);
+        offerReceipt('Devolução', response.data.transactions?.[0]?.id);
         card.value = response.data.card;
         activeTab.value = 'manage';
         await Promise.all([refreshCard(), loadShift()]);
@@ -248,6 +261,7 @@ async function confirmReplace() {
         notify(response.data.message);
         const data = await lookupCard(response.data.new_card.uid);
         setCard(data.card, data.transactions);
+        offerReceipt('Substituição de cartão', data.transactions?.[0]?.id);
     } catch (error) {
         if (!isNetworkError(error)) replaceRequestId.value = null;
         notify(apiErrorMessage(error), 'error');
@@ -316,7 +330,7 @@ onMounted(async () => {
         <div v-if="notFoundUid" class="card">
             <div class="font-semibold text-xl mb-1">Registar cartão novo</div>
             <p class="text-muted-color mb-4">
-                O cartão <strong class="font-mono">{{ notFoundUid }}</strong> ainda não está registado. Os dados do cliente são opcionais.
+                O cartão <strong class="font-mono">{{ maskUid(notFoundUid) }}</strong> ainda não está registado. Os dados do cliente são opcionais.
             </p>
             <div class="grid grid-cols-12 gap-4">
                 <div class="col-span-12 md:col-span-4 flex flex-col gap-2">
@@ -341,6 +355,16 @@ onMounted(async () => {
         <div v-if="card" class="grid grid-cols-12 gap-4">
             <div class="col-span-12 xl:col-span-5 flex flex-col gap-4">
                 <CardSummary :card="card" clearable @clear="clearCard" />
+
+                <div v-if="lastReceipt" class="card !mb-0 flex items-center gap-3">
+                    <i class="pi pi-check-circle text-green-600 text-2xl" />
+                    <div class="flex-1">
+                        <div class="font-semibold">{{ lastReceipt.label }} concluída</div>
+                        <small class="text-muted-color">O recibo é opcional.</small>
+                    </div>
+                    <Button label="Imprimir recibo" icon="pi pi-print" size="small" @click="receiptVisible = true" />
+                    <Button icon="pi pi-times" text rounded size="small" title="Não imprimir" @click="lastReceipt = null" />
+                </div>
 
                 <div class="card !mb-0">
                     <SelectButton
@@ -419,6 +443,8 @@ onMounted(async () => {
         </div>
     </div>
 
+    <CardReceiptDialog v-model:visible="receiptVisible" :transaction-id="lastReceipt?.transactionId" />
+
     <Dialog v-model:visible="topupConfirm" header="Confirmar recarga" modal :style="{ width: '26rem' }">
         <div v-if="card" class="flex flex-col gap-2">
             <div class="flex justify-between"><span>Cartão</span><strong>{{ cardDisplayName(card) }}</strong></div>
@@ -469,7 +495,7 @@ onMounted(async () => {
             </p>
             <CardReaderInput v-if="!replaceNewUid" placeholder="Passe o cartão NOVO no leitor" @read="(uid) => (replaceNewUid = uid)" />
             <div v-else class="flex items-center justify-between">
-                <span>Cartão novo: <strong class="font-mono">{{ replaceNewUid }}</strong></span>
+                <span>Cartão novo: <strong class="font-mono">{{ maskUid(replaceNewUid) }}</strong></span>
                 <Button label="Ler outro" text size="small" @click="replaceNewUid = null" />
             </div>
         </div>

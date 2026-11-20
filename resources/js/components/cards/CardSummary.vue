@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { cardDisplayName, cardStatus, formatDateTime, formatMt } from '@/utils/cards';
+import { cardDisplayName, cardStatus, cardUidLabel, formatDateTime, formatMt } from '@/utils/cards';
 
 const props = defineProps({
     card: { type: Object, required: true },
@@ -26,7 +26,7 @@ const status = computed(() => cardStatus(props.card.status));
 
         <div class="card-summary__meta">
             <span><small>Caução</small> {{ formatMt(card.deposit_amount) }}</span>
-            <span><small>UID</small> {{ card.uid }}</span>
+            <span><small>Cartão</small> {{ cardUidLabel(card) }}</span>
             <span v-if="card.code"><small>Código</small> {{ card.code }}</span>
             <span v-if="card.holder_phone"><small>Telefone</small> {{ card.holder_phone }}</span>
             <span v-if="card.registered_at"><small>Registado</small> {{ formatDateTime(card.registered_at) }}</span>

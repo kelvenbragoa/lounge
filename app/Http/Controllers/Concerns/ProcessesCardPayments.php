@@ -116,6 +116,34 @@ trait ProcessesCardPayments
     }
 
     /**
+     * Dados do cartão para a resposta de um pagamento: saldo antes/depois, UID mascarado, titular
+     * e o id do movimento (serve para pedir o recibo). Sem cartão devolve só `card_balance => null`.
+     */
+    protected function cardPaymentSummary(?Card $card, ?int $orderId): array
+    {
+        if (! $card) {
+            return ['card_balance' => null];
+        }
+
+        $transaction = CardTransaction::where('order_id', $orderId)
+            ->where('card_id', $card->id)
+            ->where('type', CardTransaction::TYPE_PURCHASE)
+            ->latest('id')
+            ->first();
+
+        $card = $card->fresh();
+
+        return [
+            'card_balance' => $card->balance,
+            'card_balance_before' => $transaction?->balance_before,
+            'card_balance_after' => $transaction?->balance_after ?? $card->balance,
+            'card_uid_masked' => $card->uid_masked,
+            'card_holder_name' => $card->holder_name,
+            'card_transaction_id' => $transaction?->id,
+        ];
+    }
+
+    /**
      * Devolve ao cartão o valor de compras de uma venda (todo o valor ainda não anulado, ou só $amount).
      */
     protected function reverseCardPurchasesForOrder(Order $order, ?float $amount, string $notes): void

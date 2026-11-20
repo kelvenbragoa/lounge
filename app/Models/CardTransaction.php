@@ -75,6 +75,27 @@ class CardTransaction extends Model
         return $this->belongsTo(Order::class);
     }
 
+    /**
+     * Produtos da venda a que o movimento pertence (compras e estornos). Inclui itens
+     * entretanto anulados (soft delete) para o extrato continuar a explicar o movimento.
+     */
+    public function items()
+    {
+        return $this->hasMany(OrderItem::class, 'order_id', 'order_id')
+            ->withTrashed()
+            ->select(['order_items.id', 'order_items.order_id', 'order_items.product_id', 'order_items.quantity',
+                'order_items.price', 'order_items.total', 'order_items.deleted_at'])
+            ->with('product:id,name');
+    }
+
+    /**
+     * Carrega o que o extrato precisa: operador, produtos e mesa da venda.
+     */
+    public function scopeWithStatement($query)
+    {
+        return $query->with(['user:id,name', 'items', 'order:id,table_id,total', 'order.table:id,name']);
+    }
+
     public function cashRegister()
     {
         return $this->belongsTo(CashRegister::class)->withoutGlobalScope('sales');

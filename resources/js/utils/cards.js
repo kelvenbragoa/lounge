@@ -39,6 +39,25 @@ export function normalizeUid(raw) {
         .toUpperCase();
 }
 
+/** "04A1B2C3" -> "****B2C3": nunca se mostra o UID completo (é a "chave" do cartão). */
+export function maskUid(uid) {
+    const value = String(uid ?? '');
+    return value ? `****${value.slice(-4)}` : '';
+}
+
+export function cardUidLabel(card) {
+    return card?.uid_masked ?? maskUid(card?.uid);
+}
+
+/** Descarrega o PDF do recibo de um movimento e devolve um blob URL para mostrar/imprimir. */
+export async function fetchCardReceiptUrl(transactionId, { copy = false } = {}) {
+    const response = await axios.get(`/api/cards/transactions/${transactionId}/receipt`, {
+        params: copy ? { copy: 1 } : {},
+        responseType: 'blob'
+    });
+    return URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+}
+
 export function cardStatus(status) {
     return CARD_STATUS[status] ?? { label: status, severity: 'secondary' };
 }

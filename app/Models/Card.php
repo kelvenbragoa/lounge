@@ -26,6 +26,12 @@ class Card extends Model
         'notes',
     ];
 
+    /**
+     * O UID completo é a "chave" do cartão: ecrãs e recibos mostram só `uid_masked`.
+     * O `uid` continua na API autenticada porque os clientes o reenviam para cobrar.
+     */
+    protected $appends = ['uid_masked'];
+
     protected $casts = [
         'customer_id' => 'integer',
         'balance' => 'float',
@@ -42,6 +48,21 @@ class Card extends Model
     public static function normalizeUid(?string $uid): string
     {
         return strtoupper(preg_replace('/[^0-9A-Fa-f]/', '', (string) $uid));
+    }
+
+    /**
+     * "04A1B2C3D4" -> "****C3D4" (só os últimos 4 caracteres).
+     */
+    public static function maskUid(?string $uid): string
+    {
+        $uid = (string) $uid;
+
+        return '****'.substr($uid, -4);
+    }
+
+    public function getUidMaskedAttribute(): string
+    {
+        return self::maskUid($this->uid);
     }
 
     public static function findByUid(?string $uid): ?self

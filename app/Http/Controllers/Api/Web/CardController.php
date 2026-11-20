@@ -70,7 +70,7 @@ class CardController extends Controller
 
         return response()->json([
             'card' => $card->load('registeredBy:id,name'),
-            'transactions' => $card->transactions()->with('user:id,name')->limit(20)->get(),
+            'transactions' => $card->transactions()->withStatement()->limit(20)->get(),
         ]);
     }
 
@@ -86,7 +86,7 @@ class CardController extends Controller
         $perPage = min(max((int) $request->input('per_page', 20), 5), 100);
 
         return response()->json(
-            $card->transactions()->with('user:id,name')->paginate($perPage)->withQueryString()
+            $card->transactions()->withStatement()->paginate($perPage)->withQueryString()
         );
     }
 
@@ -198,6 +198,12 @@ class CardController extends Controller
                 : 'Saldo transferido para o cartão novo.',
             'old_card' => $result['old_card'],
             'new_card' => $result['new_card'],
+            // Movimento de entrada no cartão novo: serve para imprimir o recibo da substituição.
+            'transactions' => $result['new_card']->transactions()
+                ->where('type', CardTransaction::TYPE_TRANSFER_IN)
+                ->orderBy('id')
+                ->limit(1)
+                ->get(),
             'replayed' => $result['replayed'],
         ]);
     }

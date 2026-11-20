@@ -20,6 +20,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use App\Models\CardTransaction;
+use App\Services\CardReceiptService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use RuntimeException;
 
@@ -411,8 +413,7 @@ class PdvController extends Controller
             'order_id' => $order->id,
             'payment_id' => $payment->id,
             'total_consumed' => $total_consumed,
-            'card_balance' => $card?->fresh()->balance,
-        ]);
+        ] + $this->cardPaymentSummary($card, $order->id));
         });
     }
 
@@ -552,6 +553,11 @@ class PdvController extends Controller
         $payment = Payment::where('order_id', $order->id)->latest('id')->first();
         $barItems = $orderitens->where('department_id', 2);
         $kitchenItems = $orderitens->where('department_id', 1);
+
+        // Venda paga com cartão: recibo de cartão (UID mascarado, saldo antes/depois)
+        if ($cardReceipt = $this->cardPurchaseReceipt($payment)) {
+            return $cardReceipt;
+        }
 
         // Mesmo template da venda rápida (com pagamento quando existir)
         if ($payment) {
@@ -728,8 +734,7 @@ class PdvController extends Controller
             'order_id' => $order->id,
             'payment_id' => $payment->id,
             'table_id' => $table->id,
-            'card_balance' => $card?->fresh()->balance,
-        ]);
+        ] + $this->cardPaymentSummary($card, $order->id));
         });
     }
 
@@ -755,12 +760,33 @@ class PdvController extends Controller
             ], 404);
         }
 
+        if ($cardReceipt = $this->cardPurchaseReceipt($payment)) {
+            return $cardReceipt;
+        }
+
         $pdf = Pdf::loadView('pdf.customerreceipt', compact('order', 'orderitens', 'payment'))->setOptions([
             'defaultFont' => 'sans-serif',
             'isRemoteEnabled' => 'true'
         ]);
 
         return $pdf->setPaper([0, 0, 226.77, 500])->stream('customerreceipt.pdf');
+    }
+
+    /**
+     * Recibo de cartão para um pagamento feito com cartão (null se o pagamento não foi com cartão).
+     */
+    private function cardPurchaseReceipt(?Payment $payment)
+    {
+        if (! $payment || ! $payment->card_id) {
+            return null;
+        }
+
+        $transaction = CardTransaction::where('payment_id', $payment->id)
+            ->where('type', CardTransaction::TYPE_PURCHASE)
+            ->latest('id')
+            ->first();
+
+        return $transaction ? app(CardReceiptService::class)->pdf($transaction) : null;
     }
 
 
