@@ -88,7 +88,7 @@ class CardsCheckCommand extends Command
         $methods = DB::table('payment_methods')->where('is_card', 1)->get(['id', 'name', 'status_id']);
 
         if ($methods->isEmpty()) {
-            $this->failCheck('Nenhum método com is_card = 1 ("Cartão Lounge").');
+            $this->failCheck('Nenhum método com is_card = 1 ("Cartão Lounge"). Corra: php artisan db:seed --class=PaymentMethodTableSeeder --force');
 
             return;
         }
@@ -114,7 +114,7 @@ class CardsCheckCommand extends Command
 
         $role = DB::table('roles')->where('id', User::ROLE_CARD_CASHIER)->first();
         if (! $role) {
-            $this->failCheck('Role '.User::ROLE_CARD_CASHIER.' não existe.');
+            $this->failCheck('Role '.User::ROLE_CARD_CASHIER.' não existe. Corra: php artisan db:seed --class=RoleTableSeeder --force');
 
             return;
         }
